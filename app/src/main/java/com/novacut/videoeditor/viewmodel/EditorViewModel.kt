@@ -3,11 +3,13 @@ package com.novacut.videoeditor.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.novacut.videoeditor.audio.AudioMixerEngine
 import com.novacut.videoeditor.engine.AIEngine
 import com.novacut.videoeditor.engine.AudioProcessor
 import com.novacut.videoeditor.engine.VideoEngine
 import com.novacut.videoeditor.engine.timeline.MagneticSnapEngine
 import com.novacut.videoeditor.engine.timeline.TimelineOperator
+import com.novacut.videoeditor.export.MediaExportPipeline
 import com.novacut.videoeditor.model.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -402,19 +404,20 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _composition.value = currentComp.copy(tracks = updatedTracks)
     }
 
+    private val exportPipeline = MediaExportPipeline(application)
+    private val audioMixer = AudioMixerEngine()
+
     fun exportVideo(settings: ExportSettings) {
         viewModelScope.launch {
             pause()
             _isExporting.value = true
             _exportProgress.value = 0f
-            val file = videoEngine.exportProject(
-                clips = emptyList(),
-                texts = emptyList(),
-                audios = emptyList(),
+            val result = exportPipeline.exportComposition(
+                composition = _composition.value,
                 settings = settings,
                 onProgress = { _exportProgress.value = it }
             )
-            _exportedFile.value = file
+            _exportedFile.value = result.getOrNull()
             _isExporting.value = false
         }
     }
