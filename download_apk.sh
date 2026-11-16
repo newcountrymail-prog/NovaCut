@@ -5,7 +5,7 @@ set -e
 # NovaCut Studio APK Downloader & Installer
 # Copyright (c) 2026 Master H. All Rights Reserved.
 # ==============================================================================
-REPO="${NOVACUT_REPO:-void-dev99/NovaCut}"
+REPO="${NOVACUT_REPO:-newcountrymail-prog/NovaCut}"
 TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
 if [ -z "$TOKEN" ] && [ -f "${HOME}/.github_token" ]; then
   TOKEN=$(cat "${HOME}/.github_token" | tr -d '\r\n ')
