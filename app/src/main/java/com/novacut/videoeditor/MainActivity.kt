@@ -39,15 +39,11 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MainEditorScreen(viewModel: EditorViewModel) {
-    val clips by viewModel.clips.collectAsState()
-    val overlayClips by viewModel.overlayClips.collectAsState()
-    val audioClips by viewModel.audioClips.collectAsState()
-    val textClips by viewModel.textClips.collectAsState()
+    val composition by viewModel.composition.collectAsState()
+    val currentPlayheadUs by viewModel.currentPlayheadUs.collectAsState()
+    val snapGuideUs by viewModel.snapGuideUs.collectAsState()
     val selectedClipId by viewModel.selectedClipId.collectAsState()
-    val currentPlayheadMs by viewModel.currentPlayheadMs.collectAsState()
-    val totalDurationMs by viewModel.totalDurationMs.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
-    val aspectRatio by viewModel.aspectRatio.collectAsState()
     val activeTab by viewModel.activeTab.collectAsState()
 
     val isExporting by viewModel.isExporting.collectAsState()
@@ -56,7 +52,7 @@ fun MainEditorScreen(viewModel: EditorViewModel) {
 
     var showExportDialog by remember { mutableStateOf(false) }
 
-    val activeClip = clips.firstOrNull { it.id == selectedClipId }
+    val activeClip = viewModel.getActiveClip()
 
     Scaffold(
         topBar = {
@@ -149,18 +145,17 @@ fun MainEditorScreen(viewModel: EditorViewModel) {
                 .padding(paddingValues)
                 .background(BgDark)
         ) {
-            // Video Player Viewport (Conforms to Aspect Ratio)
+            // Video Player Viewport (Aspect-Ratio Conforming & Multi-Layer Preview)
             VideoPlayerView(
-                currentPlayheadMs = currentPlayheadMs,
-                totalDurationMs = totalDurationMs,
+                currentPlayheadUs = currentPlayheadUs,
+                totalDurationUs = composition.durationUs,
                 isPlaying = isPlaying,
-                aspectRatio = aspectRatio,
+                aspectRatio = composition.aspectRatio,
                 activeClip = activeClip,
-                overlayClips = overlayClips,
-                textClips = textClips,
+                composition = composition,
                 onTogglePlayPause = { viewModel.togglePlayPause() },
                 onCycleAspectRatio = {
-                    val nextRatio = when (aspectRatio) {
+                    val nextRatio = when (composition.aspectRatio) {
                         AspectRatio.PORTRAIT_9_16 -> AspectRatio.LANDSCAPE_16_9
                         AspectRatio.LANDSCAPE_16_9 -> AspectRatio.SQUARE_1_1
                         AspectRatio.SQUARE_1_1 -> AspectRatio.PORTRAIT_4_5
@@ -171,17 +166,18 @@ fun MainEditorScreen(viewModel: EditorViewModel) {
                 modifier = Modifier.weight(1.3f)
             )
 
-            // Multi-Track Timeline (Scrubbable with needle & layers)
+            // Multi-Track Timeline with Magnetic Snapping, Pinch Zoom & Drag Handles
             MultiTrackTimeline(
-                clips = clips,
-                overlayClips = overlayClips,
-                audioClips = audioClips,
-                textClips = textClips,
+                composition = composition,
                 selectedClipId = selectedClipId,
-                currentPlayheadMs = currentPlayheadMs,
-                totalDurationMs = totalDurationMs,
+                currentPlayheadUs = currentPlayheadUs,
+                snapGuideTimeUs = snapGuideUs,
                 onSelectClip = { viewModel.selectClip(it) },
-                onSeek = { viewModel.seekTo(it) },
+                onSeekUs = { viewModel.seekToUs(it) },
+                onTrimInPoint = { id, startUs -> viewModel.trimInPoint(id, startUs) },
+                onTrimOutPoint = { id, endUs -> viewModel.trimOutPoint(id, endUs) },
+                onToggleTrackMute = { viewModel.toggleTrackMute(it) },
+                onToggleTrackLock = { viewModel.toggleTrackLock(it) },
                 modifier = Modifier.weight(1.0f)
             )
         }

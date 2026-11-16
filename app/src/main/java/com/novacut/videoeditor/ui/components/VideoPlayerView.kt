@@ -18,36 +18,34 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.novacut.videoeditor.model.AspectRatio
-import com.novacut.videoeditor.model.Clip
-import com.novacut.videoeditor.model.FilterPreset
-import com.novacut.videoeditor.model.TextClip
+import com.novacut.videoeditor.model.*
 import com.novacut.videoeditor.ui.theme.*
 
 @Composable
 fun VideoPlayerView(
-    currentPlayheadMs: Long,
-    totalDurationMs: Long,
+    currentPlayheadUs: Long,
+    totalDurationUs: Long,
     isPlaying: Boolean,
     aspectRatio: AspectRatio,
-    activeClip: Clip?,
-    overlayClips: List<Clip>,
-    textClips: List<TextClip>,
+    activeClip: TimelineClip?,
+    composition: Composition,
     onTogglePlayPause: () -> Unit,
     onCycleAspectRatio: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val activeLayers = composition.getClipsAt(currentPlayheadUs)
+
     Column(
         modifier = modifier
             .fillMaxWidth()
             .background(BgDark),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Top Player Bar (Aspect Ratio & Timecode)
+        // Top Player Bar (Aspect Ratio & Precision Timecode)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -76,12 +74,9 @@ fun VideoPlayerView(
                 }
             }
 
-            // Timecode display
-            val currentSec = currentPlayheadMs / 1000
-            val totalSec = totalDurationMs / 1000
-            val timeText = String.format("%02d:%02d / %02d:%02d", currentSec / 60, currentSec % 60, totalSec / 60, totalSec % 60)
+            // High Precision Timecode (MM:SS:FF)
             Text(
-                text = timeText,
+                text = "${TimeUtils.formatTimecode(currentPlayheadUs)} / ${TimeUtils.formatTimecode(totalDurationUs)}",
                 color = TextSecondary,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold
@@ -163,8 +158,9 @@ fun VideoPlayerView(
                         }
                     }
 
-                    // Picture in Picture (Overlay)
-                    if (overlayClips.isNotEmpty()) {
+                    // Render PiP Layer if active at current timestamp
+                    val pipLayer = activeLayers.firstOrNull { it.first.type == TrackType.OVERLAY_PIP }
+                    if (pipLayer != null) {
                         Box(
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
@@ -172,23 +168,21 @@ fun VideoPlayerView(
                                 .size(width = 80.dp, height = 110.dp)
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(Color(0xFF2A2A34))
-                                .border(1.dp, CyanAccent, RoundedCornerShape(6.dp)),
+                                .border(1.dp, PinkAccent, RoundedCornerShape(6.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "PIP Layer",
-                                color = CyanAccent,
+                                text = "PiP Layer",
+                                color = PinkAccent,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
                     }
 
-                    // Render Subtitles / Auto Captions
-                    val currentText = textClips.firstOrNull {
-                        currentPlayheadMs >= it.startMs && currentPlayheadMs <= (it.startMs + it.durationMs)
-                    }
-                    if (currentText != null) {
+                    // Render Text / Subtitle Layer if active at current timestamp
+                    val textLayer = activeLayers.firstOrNull { it.first.type == TrackType.TEXT_CAPTION }
+                    if (textLayer != null) {
                         Surface(
                             color = Color(0xAA000000),
                             shape = RoundedCornerShape(6.dp),
@@ -197,8 +191,8 @@ fun VideoPlayerView(
                                 .padding(bottom = 24.dp)
                         ) {
                             Text(
-                                text = currentText.text,
-                                color = Color(android.graphics.Color.parseColor(currentText.textColorHex)),
+                                text = textLayer.second.name,
+                                color = CyanAccent,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)

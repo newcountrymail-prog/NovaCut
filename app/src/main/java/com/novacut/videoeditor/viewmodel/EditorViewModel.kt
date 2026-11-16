@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.novacut.videoeditor.engine.AIEngine
 import com.novacut.videoeditor.engine.AudioProcessor
 import com.novacut.videoeditor.engine.VideoEngine
+import com.novacut.videoeditor.engine.timeline.MagneticSnapEngine
+import com.novacut.videoeditor.engine.timeline.TimelineOperator
 import com.novacut.videoeditor.model.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -16,54 +18,107 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.util.UUID
 
-enum class ToolTab {
-    NONE,
-    SPLIT,
-    SPEED,
-    AUDIO,
-    TEXT,
-    OVERLAY,
-    EFFECTS,
-    FILTERS,
-    ADJUST,
-    AI_TOOLS,
-    CANVAS
-}
-
 class EditorViewModel(application: Application) : AndroidViewModel(application) {
 
     private val videoEngine = VideoEngine(application)
     private val audioProcessor = AudioProcessor()
     private val aiEngine = AIEngine()
+    private val magneticSnapEngine = MagneticSnapEngine()
+    private val timelineOperator = TimelineOperator()
 
-    // Timeline Clips
-    private val _clips = MutableStateFlow<List<Clip>>(emptyList())
-    val clips: StateFlow<List<Clip>> = _clips.asStateFlow()
+    // Master Composition Graph
+    private val _composition = MutableStateFlow(
+        Composition(
+            id = UUID.randomUUID().toString(),
+            name = "Project 1",
+            tracks = listOf(
+                CompositionTrack(
+                    id = "track-v1",
+                    type = TrackType.MAIN_VIDEO,
+                    name = "V1 (Main)",
+                    zIndex = 0,
+                    clips = listOf(
+                        TimelineClip(
+                            id = "clip-1",
+                            sourceUri = null,
+                            name = "Intro Scene.mp4",
+                            timelineStartUs = 0L,
+                            timelineDurationUs = 5_000_000L,
+                            sourceEndOffsetUs = 5_000_000L,
+                            sourceTotalDurationUs = 10_000_000L,
+                            filter = FilterPreset.CINEMATIC
+                        ),
+                        TimelineClip(
+                            id = "clip-2",
+                            sourceUri = null,
+                            name = "Action Shot.mp4",
+                            timelineStartUs = 5_000_000L,
+                            timelineDurationUs = 5_000_000L,
+                            sourceEndOffsetUs = 5_000_000L,
+                            sourceTotalDurationUs = 10_000_000L,
+                            filter = FilterPreset.WARM_GOLD
+                        )
+                    )
+                ),
+                CompositionTrack(
+                    id = "track-v2",
+                    type = TrackType.OVERLAY_PIP,
+                    name = "V2 (PiP)",
+                    zIndex = 1,
+                    clips = emptyList()
+                ),
+                CompositionTrack(
+                    id = "track-a1",
+                    type = TrackType.AUDIO,
+                    name = "A1 (Music)",
+                    zIndex = 2,
+                    clips = listOf(
+                        TimelineClip(
+                            id = "audio-1",
+                            sourceUri = null,
+                            name = "Cyberpunk Beat.mp3",
+                            timelineStartUs = 0L,
+                            timelineDurationUs = 10_000_000L,
+                            sourceEndOffsetUs = 10_000_000L,
+                            sourceTotalDurationUs = 10_000_000L
+                        )
+                    )
+                ),
+                CompositionTrack(
+                    id = "track-t1",
+                    type = TrackType.TEXT_CAPTION,
+                    name = "T1 (Text)",
+                    zIndex = 3,
+                    clips = listOf(
+                        TimelineClip(
+                            id = "text-1",
+                            sourceUri = null,
+                            name = "NovaCut Studio",
+                            timelineStartUs = 500_000L,
+                            timelineDurationUs = 3_500_000L,
+                            sourceEndOffsetUs = 3_500_000L,
+                            sourceTotalDurationUs = 3_500_000L
+                        )
+                    )
+                )
+            )
+        )
+    )
+    val composition: StateFlow<Composition> = _composition.asStateFlow()
 
-    private val _overlayClips = MutableStateFlow<List<Clip>>(emptyList())
-    val overlayClips: StateFlow<List<Clip>> = _overlayClips.asStateFlow()
+    // Precision Playhead in Microseconds
+    private val _currentPlayheadUs = MutableStateFlow(0L)
+    val currentPlayheadUs: StateFlow<Long> = _currentPlayheadUs.asStateFlow()
 
-    private val _audioClips = MutableStateFlow<List<AudioClip>>(emptyList())
-    val audioClips: StateFlow<List<AudioClip>> = _audioClips.asStateFlow()
-
-    private val _textClips = MutableStateFlow<List<TextClip>>(emptyList())
-    val textClips: StateFlow<List<TextClip>> = _textClips.asStateFlow()
-
-    // Editor Playhead & State
-    private val _currentPlayheadMs = MutableStateFlow(0L)
-    val currentPlayheadMs: StateFlow<Long> = _currentPlayheadMs.asStateFlow()
-
-    private val _totalDurationMs = MutableStateFlow(10000L)
-    val totalDurationMs: StateFlow<Long> = _totalDurationMs.asStateFlow()
-
-    private val _isPlaying = MutableStateFlow(false)
-    val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
+    // Magnetic Snapping Guide line indicator (null when not snapping)
+    private val _snapGuideUs = MutableStateFlow<Long?>(null)
+    val snapGuideUs: StateFlow<Long?> = _snapGuideUs.asStateFlow()
 
     private val _selectedClipId = MutableStateFlow<String?>("clip-1")
     val selectedClipId: StateFlow<String?> = _selectedClipId.asStateFlow()
 
-    private val _aspectRatio = MutableStateFlow(AspectRatio.PORTRAIT_9_16)
-    val aspectRatio: StateFlow<AspectRatio> = _aspectRatio.asStateFlow()
+    private val _isPlaying = MutableStateFlow(false)
+    val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
     private val _activeTab = MutableStateFlow(ToolTab.NONE)
     val activeTab: StateFlow<ToolTab> = _activeTab.asStateFlow()
@@ -80,50 +135,6 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     private var playbackJob: Job? = null
 
-    init {
-        // Initialize default sample multi-layer project
-        val defaultClip1 = Clip(
-            id = "clip-1",
-            uri = null,
-            name = "Intro Scene.mp4",
-            startTrimMs = 0L,
-            endTrimMs = 5000L,
-            durationMs = 5000L,
-            filter = FilterPreset.CINEMATIC
-        )
-        val defaultClip2 = Clip(
-            id = "clip-2",
-            uri = null,
-            name = "Action Shot.mp4",
-            startTrimMs = 0L,
-            endTrimMs = 5000L,
-            durationMs = 5000L,
-            filter = FilterPreset.WARM_GOLD
-        )
-        _clips.value = listOf(defaultClip1, defaultClip2)
-
-        _audioClips.value = listOf(
-            audioProcessor.createSampleAudio("Cyberpunk Beat.mp3", 10000L)
-        )
-
-        _textClips.value = listOf(
-            TextClip(
-                id = UUID.randomUUID().toString(),
-                text = "NovaCut Studio",
-                startMs = 500L,
-                durationMs = 3500L,
-                textColorHex = "#00E5FF"
-            )
-        )
-
-        updateTotalDuration()
-    }
-
-    private fun updateTotalDuration() {
-        val duration = videoEngine.calculateTotalDurationMs(_clips.value)
-        _totalDurationMs.value = if (duration > 0) duration else 10000L
-    }
-
     fun selectClip(clipId: String?) {
         _selectedClipId.value = clipId
     }
@@ -133,34 +144,47 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setAspectRatio(ratio: AspectRatio) {
-        _aspectRatio.value = ratio
+        _composition.value = _composition.value.copy(aspectRatio = ratio)
     }
 
-    fun seekTo(timeMs: Long) {
-        _currentPlayheadMs.value = timeMs.coerceIn(0L, _totalDurationMs.value)
+    /**
+     * Seek with Magnetic Snapping:
+     * When user drags near clip edges or beat markers, it snaps smoothly.
+     */
+    fun seekToUs(requestedUs: Long) {
+        val snapResult = magneticSnapEngine.findSnapPoint(
+            proposedTimeUs = requestedUs,
+            composition = _composition.value,
+            playheadUs = _currentPlayheadUs.value
+        )
+        if (snapResult != null) {
+            _currentPlayheadUs.value = snapResult.snappedTimeUs
+            _snapGuideUs.value = snapResult.snappedTimeUs
+        } else {
+            _currentPlayheadUs.value = requestedUs.coerceIn(0L, _composition.value.durationUs)
+            _snapGuideUs.value = null
+        }
     }
 
     fun togglePlayPause() {
-        if (_isPlaying.value) {
-            pause()
-        } else {
-            play()
-        }
+        if (_isPlaying.value) pause() else play()
     }
 
     private fun play() {
         _isPlaying.value = true
+        _snapGuideUs.value = null
         playbackJob?.cancel()
         playbackJob = viewModelScope.launch {
+            val stepUs = (TimeUtils.US_PER_SECOND / 30) // 30 FPS update interval
             while (_isPlaying.value) {
-                delay(33) // ~30 fps update
-                val next = _currentPlayheadMs.value + 33
-                if (next >= _totalDurationMs.value) {
-                    _currentPlayheadMs.value = 0L
+                delay(33)
+                val nextUs = _currentPlayheadUs.value + stepUs
+                if (nextUs >= _composition.value.durationUs) {
+                    _currentPlayheadUs.value = 0L
                     _isPlaying.value = false
                     break
                 } else {
-                    _currentPlayheadMs.value = next
+                    _currentPlayheadUs.value = nextUs
                 }
             }
         }
@@ -171,131 +195,211 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         playbackJob?.cancel()
     }
 
+    /**
+     * Module 1 Operator: Split Clip
+     */
     fun splitCurrentClip() {
-        val currentId = _selectedClipId.value ?: return
-        val currentList = _clips.value.toMutableList()
-        val index = currentList.indexOfFirst { it.id == currentId }
-        if (index != -1) {
-            val clip = currentList[index]
-            val splitAt = clip.startTrimMs + ((clip.endTrimMs - clip.startTrimMs) / 2)
-            val parts = videoEngine.splitClip(clip, splitAt)
-            if (parts != null) {
-                currentList.removeAt(index)
-                currentList.add(index, parts.first)
-                currentList.add(index + 1, parts.second)
-                _clips.value = currentList
-                _selectedClipId.value = parts.second.id
-                updateTotalDuration()
+        val clipId = _selectedClipId.value ?: return
+        val currentComp = _composition.value
+        for (track in currentComp.tracks) {
+            val splitResult = timelineOperator.splitClip(track, clipId, _currentPlayheadUs.value)
+            if (splitResult != null) {
+                val updatedTrack = splitResult.first
+                val newClips = splitResult.second
+                val updatedTracks = currentComp.tracks.map {
+                    if (it.id == track.id) updatedTrack else it
+                }
+                _composition.value = currentComp.copy(tracks = updatedTracks)
+                _selectedClipId.value = newClips.second.id
+                break
             }
         }
     }
 
-    fun deleteCurrentClip() {
-        val currentId = _selectedClipId.value ?: return
-        val currentList = _clips.value.filterNot { it.id == currentId }
-        _clips.value = currentList
-        _selectedClipId.value = currentList.firstOrNull()?.id
-        updateTotalDuration()
-    }
-
-    fun duplicateCurrentClip() {
-        val currentId = _selectedClipId.value ?: return
-        val clip = _clips.value.find { it.id == currentId } ?: return
-        val newClip = clip.copy(id = UUID.randomUUID().toString())
-        _clips.value = _clips.value + newClip
-        _selectedClipId.value = newClip.id
-        updateTotalDuration()
-    }
-
-    fun setSpeed(speed: Float) {
-        val currentId = _selectedClipId.value ?: return
-        _clips.value = _clips.value.map {
-            if (it.id == currentId) it.copy(speed = speed) else it
+    /**
+     * Module 1 Operator: Left Trim (In-Point)
+     */
+    fun trimInPoint(clipId: String, newStartUs: Long) {
+        val currentComp = _composition.value
+        val updatedTracks = currentComp.tracks.map { track ->
+            timelineOperator.trimInPoint(track, clipId, newStartUs) ?: track
         }
-        updateTotalDuration()
+        _composition.value = currentComp.copy(tracks = updatedTracks)
+    }
+
+    /**
+     * Module 1 Operator: Right Trim (Out-Point)
+     */
+    fun trimOutPoint(clipId: String, newEndUs: Long) {
+        val currentComp = _composition.value
+        val updatedTracks = currentComp.tracks.map { track ->
+            timelineOperator.trimOutPoint(track, clipId, newEndUs) ?: track
+        }
+        _composition.value = currentComp.copy(tracks = updatedTracks)
+    }
+
+    /**
+     * Module 1 Operator: Ripple Delete
+     */
+    fun deleteCurrentClip() {
+        val clipId = _selectedClipId.value ?: return
+        val currentComp = _composition.value
+        val updatedTracks = currentComp.tracks.map { track ->
+            timelineOperator.rippleDelete(track, clipId)
+        }
+        _composition.value = currentComp.copy(tracks = updatedTracks)
+        _selectedClipId.value = null
+    }
+
+    /**
+     * Module 1 Operator: Speed Scaling
+     */
+    fun setSpeed(newSpeed: Float) {
+        val clipId = _selectedClipId.value ?: return
+        val currentComp = _composition.value
+        val updatedTracks = currentComp.tracks.map { track ->
+            timelineOperator.setSpeed(track, clipId, newSpeed) ?: track
+        }
+        _composition.value = currentComp.copy(tracks = updatedTracks)
+    }
+
+    fun toggleTrackMute(trackId: String) {
+        _composition.value = _composition.value.copy(
+            tracks = _composition.value.tracks.map {
+                if (it.id == trackId) it.copy(isMuted = !it.isMuted) else it
+            }
+        )
+    }
+
+    fun toggleTrackLock(trackId: String) {
+        _composition.value = _composition.value.copy(
+            tracks = _composition.value.tracks.map {
+                if (it.id == trackId) it.copy(isLocked = !it.isLocked) else it
+            }
+        )
+    }
+
+    fun getActiveClip(): TimelineClip? {
+        val clipId = _selectedClipId.value ?: return null
+        return _composition.value.tracks.flatMap { it.clips }.firstOrNull { it.id == clipId }
     }
 
     fun setFilter(filter: FilterPreset) {
-        val currentId = _selectedClipId.value ?: return
-        _clips.value = _clips.value.map {
-            if (it.id == currentId) it.copy(filter = filter) else it
-        }
+        val clipId = _selectedClipId.value ?: return
+        updateClip(clipId) { it.copy(filter = filter) }
     }
 
     fun updateAdjustment(adjustment: ColorAdjustment) {
-        val currentId = _selectedClipId.value ?: return
-        _clips.value = _clips.value.map {
-            if (it.id == currentId) it.copy(adjustment = adjustment) else it
-        }
-    }
-
-    fun toggleMute() {
-        val currentId = _selectedClipId.value ?: return
-        _clips.value = _clips.value.map {
-            if (it.id == currentId) it.copy(isMuted = !it.isMuted) else it
-        }
-    }
-
-    fun toggleReverse() {
-        val currentId = _selectedClipId.value ?: return
-        _clips.value = _clips.value.map {
-            if (it.id == currentId) it.copy(isReversed = !it.isReversed) else it
-        }
+        val clipId = _selectedClipId.value ?: return
+        updateClip(clipId) { it.copy(colorAdjustment = adjustment) }
     }
 
     fun toggleChromaKey() {
-        val currentId = _selectedClipId.value ?: return
-        _clips.value = _clips.value.map {
-            if (it.id == currentId) aiEngine.toggleChromaKey(it) else it
-        }
+        val clipId = _selectedClipId.value ?: return
+        updateClip(clipId) { it.copy(isChromaKeyEnabled = !it.isChromaKeyEnabled) }
     }
 
     fun toggleBackgroundCutout() {
-        val currentId = _selectedClipId.value ?: return
-        _clips.value = _clips.value.map {
-            if (it.id == currentId) aiEngine.toggleBackgroundCutout(it) else it
-        }
+        val clipId = _selectedClipId.value ?: return
+        updateClip(clipId) { it.copy(isBackgroundCutoutEnabled = !it.isBackgroundCutoutEnabled) }
     }
 
     fun toggleSmoothSlowMo() {
-        val currentId = _selectedClipId.value ?: return
-        _clips.value = _clips.value.map {
-            if (it.id == currentId) aiEngine.toggleSmoothSlowMo(it) else it
-        }
+        val clipId = _selectedClipId.value ?: return
+        updateClip(clipId) { it.copy(isSmoothSlowMoEnabled = !it.isSmoothSlowMoEnabled) }
     }
 
-    fun addOverlayClip(name: String = "Overlay PIP Clip.mp4") {
-        val newOverlay = Clip(
+    private fun updateClip(clipId: String, transform: (TimelineClip) -> TimelineClip) {
+        val currentComp = _composition.value
+        val updatedTracks = currentComp.tracks.map { track ->
+            val updatedClips = track.clips.map { clip ->
+                if (clip.id == clipId) transform(clip) else clip
+            }
+            track.copy(clips = updatedClips)
+        }
+        _composition.value = currentComp.copy(tracks = updatedTracks)
+    }
+
+    fun addOverlayClip(name: String = "PiP Layer.mp4") {
+        val currentComp = _composition.value
+        val newClip = TimelineClip(
             id = UUID.randomUUID().toString(),
-            uri = null,
+            sourceUri = null,
             name = name,
-            startTrimMs = 0L,
-            endTrimMs = 4000L,
-            durationMs = 4000L
+            timelineStartUs = _currentPlayheadUs.value,
+            timelineDurationUs = 4_000_000L,
+            sourceEndOffsetUs = 4_000_000L,
+            sourceTotalDurationUs = 4_000_000L
         )
-        _overlayClips.value = _overlayClips.value + newOverlay
+        val updatedTracks = currentComp.tracks.map { track ->
+            if (track.type == TrackType.OVERLAY_PIP) {
+                track.copy(clips = track.clips + newClip)
+            } else track
+        }
+        _composition.value = currentComp.copy(tracks = updatedTracks)
+        _selectedClipId.value = newClip.id
     }
 
     fun addTextOverlay(text: String = "Double Tap to Edit") {
-        val newText = TextClip(
+        val currentComp = _composition.value
+        val newClip = TimelineClip(
             id = UUID.randomUUID().toString(),
-            text = text,
-            startMs = _currentPlayheadMs.value,
-            durationMs = 3000L
+            sourceUri = null,
+            name = text,
+            timelineStartUs = _currentPlayheadUs.value,
+            timelineDurationUs = 3_000_000L,
+            sourceEndOffsetUs = 3_000_000L,
+            sourceTotalDurationUs = 3_000_000L
         )
-        _textClips.value = _textClips.value + newText
+        val updatedTracks = currentComp.tracks.map { track ->
+            if (track.type == TrackType.TEXT_CAPTION) {
+                track.copy(clips = track.clips + newClip)
+            } else track
+        }
+        _composition.value = currentComp.copy(tracks = updatedTracks)
     }
 
     fun generateAutoCaptions() {
         viewModelScope.launch {
-            val captions = aiEngine.generateAutoCaptions(_totalDurationMs.value)
-            _textClips.value = _textClips.value + captions
+            val captions = aiEngine.generateAutoCaptions(TimeUtils.usToMs(_composition.value.durationUs))
+            val currentComp = _composition.value
+            val captionClips = captions.map {
+                TimelineClip(
+                    id = it.id,
+                    sourceUri = null,
+                    name = it.text,
+                    timelineStartUs = TimeUtils.msToUs(it.startMs),
+                    timelineDurationUs = TimeUtils.msToUs(it.durationMs),
+                    sourceEndOffsetUs = TimeUtils.msToUs(it.durationMs),
+                    sourceTotalDurationUs = TimeUtils.msToUs(it.durationMs)
+                )
+            }
+            val updatedTracks = currentComp.tracks.map { track ->
+                if (track.type == TrackType.TEXT_CAPTION) {
+                    track.copy(clips = track.clips + captionClips)
+                } else track
+            }
+            _composition.value = currentComp.copy(tracks = updatedTracks)
         }
     }
 
     fun addAudioTrack(title: String = "Soundtrack Track 2") {
-        val newAudio = audioProcessor.createSampleAudio(title, _totalDurationMs.value)
-        _audioClips.value = _audioClips.value + newAudio
+        val currentComp = _composition.value
+        val newClip = TimelineClip(
+            id = UUID.randomUUID().toString(),
+            sourceUri = null,
+            name = title,
+            timelineStartUs = 0L,
+            timelineDurationUs = currentComp.durationUs.coerceAtLeast(8_000_000L),
+            sourceEndOffsetUs = currentComp.durationUs.coerceAtLeast(8_000_000L),
+            sourceTotalDurationUs = currentComp.durationUs.coerceAtLeast(8_000_000L)
+        )
+        val updatedTracks = currentComp.tracks.map { track ->
+            if (track.type == TrackType.AUDIO) {
+                track.copy(clips = track.clips + newClip)
+            } else track
+        }
+        _composition.value = currentComp.copy(tracks = updatedTracks)
     }
 
     fun exportVideo(settings: ExportSettings) {
@@ -304,9 +408,9 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             _isExporting.value = true
             _exportProgress.value = 0f
             val file = videoEngine.exportProject(
-                clips = _clips.value,
-                texts = _textClips.value,
-                audios = _audioClips.value,
+                clips = emptyList(),
+                texts = emptyList(),
+                audios = emptyList(),
                 settings = settings,
                 onProgress = { _exportProgress.value = it }
             )

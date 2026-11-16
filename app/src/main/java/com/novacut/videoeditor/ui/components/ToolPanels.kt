@@ -1,7 +1,6 @@
 package com.novacut.videoeditor.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -14,14 +13,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.novacut.videoeditor.model.AspectRatio
-import com.novacut.videoeditor.model.Clip
 import com.novacut.videoeditor.model.ColorAdjustment
 import com.novacut.videoeditor.model.FilterPreset
+import com.novacut.videoeditor.model.TimelineClip
 import com.novacut.videoeditor.ui.theme.*
 import com.novacut.videoeditor.viewmodel.EditorViewModel
 import com.novacut.videoeditor.viewmodel.ToolTab
@@ -29,7 +27,7 @@ import com.novacut.videoeditor.viewmodel.ToolTab
 @Composable
 fun ToolPanelContainer(
     activeTab: ToolTab,
-    activeClip: Clip?,
+    activeClip: TimelineClip?,
     viewModel: EditorViewModel,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
@@ -58,7 +56,7 @@ fun ToolPanelContainer(
                         ToolTab.SPEED -> "Speed Ramping & Slow-Mo"
                         ToolTab.AUDIO -> "Audio Studio & Voice FX"
                         ToolTab.TEXT -> "Text & AI Auto-Captions"
-                        ToolTab.OVERLAY -> "Overlay & Picture-in-Picture (PIP)"
+                        ToolTab.OVERLAY -> "Overlay & Picture-in-Picture (PiP)"
                         ToolTab.FILTERS -> "Cinematic Filters & LUTs"
                         ToolTab.ADJUST -> "Color Grading & Adjust"
                         ToolTab.AI_TOOLS -> "AI Magic Tools"
@@ -167,33 +165,18 @@ fun ToolPanelContainer(
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("+ Add Video/Photo Overlay (PIP)", color = BgDark, fontWeight = FontWeight.Bold)
+                        Text("+ Add Video/Photo Overlay (PiP)", color = BgDark, fontWeight = FontWeight.Bold)
                     }
                 }
 
                 ToolTab.AUDIO -> {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    Button(
+                        onClick = { viewModel.addAudioTrack() },
+                        colors = ButtonDefaults.buttonColors(containerColor = GreenSuccess),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Button(
-                            onClick = { viewModel.addAudioTrack() },
-                            colors = ButtonDefaults.buttonColors(containerColor = GreenSuccess),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("+ Add Soundtrack", color = BgDark, fontWeight = FontWeight.Bold)
-                        }
-                        Button(
-                            onClick = { viewModel.toggleMute() },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (activeClip?.isMuted == true) PinkAccent else SurfaceCard
-                            ),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(if (activeClip?.isMuted == true) "Muted" else "Mute Original", color = TextWhite)
-                        }
+                        Text("+ Add Music / Audio Track", color = BgDark, fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -227,8 +210,8 @@ fun ToolPanelContainer(
                 }
 
                 ToolTab.ADJUST -> {
-                    var brightness by remember { mutableFloatStateOf(activeClip?.adjustment?.brightness ?: 0f) }
-                    var contrast by remember { mutableFloatStateOf(activeClip?.adjustment?.contrast ?: 1f) }
+                    var brightness by remember { mutableFloatStateOf(activeClip?.colorAdjustment?.brightness ?: 0f) }
+                    var contrast by remember { mutableFloatStateOf(activeClip?.colorAdjustment?.contrast ?: 1f) }
                     Column {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Brightness", color = TextSecondary, fontSize = 12.sp)
@@ -238,7 +221,7 @@ fun ToolPanelContainer(
                             value = brightness,
                             onValueChange = {
                                 brightness = it
-                                viewModel.updateAdjustment(activeClip?.adjustment?.copy(brightness = it) ?: ColorAdjustment(brightness = it))
+                                viewModel.updateAdjustment(activeClip?.colorAdjustment?.copy(brightness = it) ?: ColorAdjustment(brightness = it))
                             },
                             valueRange = -0.5f..0.5f
                         )
@@ -250,7 +233,7 @@ fun ToolPanelContainer(
                             value = contrast,
                             onValueChange = {
                                 contrast = it
-                                viewModel.updateAdjustment(activeClip?.adjustment?.copy(contrast = it) ?: ColorAdjustment(contrast = it))
+                                viewModel.updateAdjustment(activeClip?.colorAdjustment?.copy(contrast = it) ?: ColorAdjustment(contrast = it))
                             },
                             valueRange = 0.5f..1.5f
                         )
@@ -262,8 +245,9 @@ fun ToolPanelContainer(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        val currentRatio = viewModel.composition.collectAsState().value.aspectRatio
                         AspectRatio.values().forEach { ratio ->
-                            val isSelected = viewModel.aspectRatio.collectAsState().value == ratio
+                            val isSelected = currentRatio == ratio
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
